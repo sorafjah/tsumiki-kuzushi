@@ -1,0 +1,815 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>つみきタワーくずし</title>
+<link href="https://fonts.googleapis.com/css2?family=BIZ+UDPGothic:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body {
+    width:100%; height:100dvh; overflow:hidden;
+    font-family:'BIZ UDPGothic', sans-serif;
+    touch-action:none; user-select:none; -webkit-user-select:none;
+    background:#1a2238;
+  }
+  #canvas { position:fixed; inset:0; width:100%; height:100%; display:block; }
+
+  /* ===== HUD ===== */
+  #hud {
+    position:fixed; top:env(safe-area-inset-top, 0); left:0; right:0;
+    display:none; justify-content:space-between; align-items:flex-start;
+    padding:10px 12px; pointer-events:none; z-index:10;
+  }
+  .hud-box {
+    background:rgba(20,28,54,.78); color:#fff; border-radius:14px;
+    padding:8px 14px; min-height:44px; display:flex; flex-direction:column;
+    justify-content:center; align-items:center; backdrop-filter:blur(4px);
+  }
+  .hud-label { font-size:12px; opacity:.85; }
+  .hud-value { font-size:24px; font-weight:700; line-height:1.1; }
+  #hud-center .hud-value { color:#ffd166; font-size:30px; }
+
+  /* ===== ボタン共通 ===== */
+  .btn {
+    font-family:inherit; font-weight:700; border:none; border-radius:18px;
+    min-height:56px; min-width:44px; padding:12px 26px; font-size:20px;
+    color:#fff; cursor:pointer; box-shadow:0 4px 0 rgba(0,0,0,.25);
+    transition:transform .08s;
+  }
+  .btn:active { transform:translateY(3px); box-shadow:0 1px 0 rgba(0,0,0,.25); }
+  .btn-blue   { background:#3a86ff; }
+  .btn-orange { background:#fb8500; }
+  .btn-green  { background:#2ec4b6; }
+  .btn-gray   { background:#6c757d; }
+
+  /* ===== 画面オーバーレイ ===== */
+  .screen {
+    position:fixed; inset:0; z-index:20;
+    display:flex; flex-direction:column; justify-content:center; align-items:center;
+    gap:22px; background:rgba(15,20,40,.86); color:#fff; text-align:center;
+    padding:24px;
+  }
+  .hidden { display:none !important; }
+  h1 { font-size:min(9vw,52px); color:#ffd166; text-shadow:0 3px 0 rgba(0,0,0,.4); }
+  .subtitle { font-size:17px; line-height:1.7; opacity:.92; }
+  .hiscore { font-size:16px; color:#8ecae6; }
+  #result-title { font-size:min(10vw,46px); color:#ffd166; }
+  #result-detail { font-size:22px; line-height:1.8; }
+  .newrecord { color:#ff6b9d; font-size:26px; font-weight:700; animation:pop .6s infinite alternate; }
+  @keyframes pop { from{transform:scale(1)} to{transform:scale(1.12)} }
+
+  /* ===== 下部操作エリア ===== */
+  #bottom-bar {
+    position:fixed; left:0; right:0; bottom:calc(env(safe-area-inset-bottom,0) + 10px);
+    display:none; justify-content:center; gap:14px; z-index:10; pointer-events:none;
+  }
+  #bottom-bar .btn { pointer-events:auto; }
+  #aim-hint {
+    position:fixed; bottom:calc(env(safe-area-inset-bottom,0) + 84px);
+    left:0; right:0; text-align:center; color:#fff; font-size:16px;
+    text-shadow:0 2px 4px #000; pointer-events:none; z-index:9; display:none;
+  }
+  #spawn-btn-wrap {
+    position:fixed; bottom:calc(env(safe-area-inset-bottom,0) + 84px);
+    left:0; right:0; display:none; justify-content:center; z-index:10; pointer-events:none;
+  }
+  #spawn-btn-wrap .btn { pointer-events:auto; }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+
+<!-- HUD -->
+<div id="hud">
+  <div class="hud-box" id="hud-left">
+    <div class="hud-label" id="hud-left-label">のこりボール</div>
+    <div class="hud-value" id="hud-left-value">5</div>
+  </div>
+  <div class="hud-box" id="hud-center">
+    <div class="hud-label" id="hud-center-label">くずれた数</div>
+    <div class="hud-value" id="hud-center-value">0</div>
+  </div>
+  <div class="hud-box" id="hud-right">
+    <div class="hud-label">ハイスコア</div>
+    <div class="hud-value" id="hud-right-value">0</div>
+  </div>
+</div>
+
+<div id="aim-hint">下の方から ゆびで ひっぱって はなすと ボールが とぶよ！</div>
+
+<div id="spawn-btn-wrap">
+  <button class="btn btn-green" id="btn-spawn">つみきを だす</button>
+</div>
+
+<div id="bottom-bar">
+  <button class="btn btn-orange" id="btn-reset">もう一回積む</button>
+  <button class="btn btn-gray" id="btn-home">ホーム</button>
+</div>
+
+<!-- タイトル画面 -->
+<div class="screen" id="screen-title">
+  <h1>つみきタワーくずし</h1>
+  <div class="subtitle">あそびかたを えらんでね</div>
+  <button class="btn btn-blue" id="btn-mode-kuzusu" style="font-size:24px;">🎳 くずすモード</button>
+  <div class="subtitle" style="margin-top:-12px;">ボールを なげて タワーを くずそう（ボール5こ）</div>
+  <button class="btn btn-green" id="btn-mode-tsumu" style="font-size:24px;">🧱 つむモード</button>
+  <div class="subtitle" style="margin-top:-12px;">60びょうで たかい タワーを つくろう</div>
+  <div class="hiscore" id="title-hiscore"></div>
+</div>
+
+<!-- 結果画面 -->
+<div class="screen hidden" id="screen-result">
+  <div id="result-title">けっか</div>
+  <div id="result-detail"></div>
+  <div class="newrecord hidden" id="result-newrecord">🎉 しんきろく！ 🎉</div>
+  <button class="btn btn-orange" id="btn-retry" style="font-size:22px;">もういちど</button>
+  <button class="btn btn-gray" id="btn-result-home">ホームへ</button>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "cannon-es": "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import * as CANNON from 'cannon-es';
+
+/* =========================================================
+   基本セットアップ
+========================================================= */
+const canvas = document.getElementById('canvas');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias:true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87ceeb);
+scene.fog = new THREE.Fog(0x87ceeb, 40, 90);
+
+const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 200);
+
+const sun = new THREE.DirectionalLight(0xffffff, 2.2);
+sun.position.set(10, 20, 8);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024);
+sun.shadow.camera.left = -15; sun.shadow.camera.right = 15;
+sun.shadow.camera.top = 15;  sun.shadow.camera.bottom = -15;
+scene.add(sun);
+scene.add(new THREE.AmbientLight(0xffffff, 0.9));
+
+// 地面
+const groundMesh = new THREE.Mesh(
+  new THREE.PlaneGeometry(120, 120),
+  new THREE.MeshLambertMaterial({ color:0x9ccc65 })
+);
+groundMesh.rotation.x = -Math.PI/2;
+groundMesh.receiveShadow = true;
+scene.add(groundMesh);
+// 台座（見た目のみ）
+const dais = new THREE.Mesh(
+  new THREE.CylinderGeometry(4.2, 4.6, 0.3, 32),
+  new THREE.MeshLambertMaterial({ color:0xd7b899 })
+);
+dais.position.y = 0.15;
+dais.receiveShadow = true;
+scene.add(dais);
+
+function resize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+
+/* =========================================================
+   物理ワールド
+========================================================= */
+const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -9.82, 0) });
+world.broadphase = new CANNON.SAPBroadphase(world);   // 剛体数が多くても高速
+world.allowSleep = true;                              // スリープ有効
+world.solver.iterations = 12;
+world.defaultContactMaterial.friction = 0.5;
+world.defaultContactMaterial.restitution = 0.05;
+
+const matBlock  = new CANNON.Material('block');
+const matGround = new CANNON.Material('ground');
+const matBall   = new CANNON.Material('ball');
+world.addContactMaterial(new CANNON.ContactMaterial(matBlock, matBlock,  { friction:0.55, restitution:0.02 }));
+world.addContactMaterial(new CANNON.ContactMaterial(matBlock, matGround, { friction:0.65, restitution:0.02 }));
+world.addContactMaterial(new CANNON.ContactMaterial(matBall,  matBlock,  { friction:0.3,  restitution:0.25 }));
+world.addContactMaterial(new CANNON.ContactMaterial(matBall,  matGround, { friction:0.4,  restitution:0.35 }));
+
+const groundBody = new CANNON.Body({ type: CANNON.Body.STATIC, shape:new CANNON.Plane(), material:matGround });
+groundBody.quaternion.setFromEuler(-Math.PI/2, 0, 0);
+world.addBody(groundBody);
+
+// 台座の物理ボディ（静的シリンダー）：積み木がめり込まないように
+const daisBody = new CANNON.Body({
+  type: CANNON.Body.STATIC,
+  shape: new CANNON.Cylinder(4.2, 4.6, 0.3, 16),
+  material: matGround
+});
+daisBody.position.set(0, 0.15, 0);
+world.addBody(daisBody);
+
+/* =========================================================
+   Web Audio
+========================================================= */
+let audioCtx = null;
+function ensureAudio() {
+  if (!audioCtx) {
+    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {}
+  }
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+}
+let lastHitSound = 0;
+function playHit(strength) {         // 積み木がぶつかる「コツン」音
+  if (!audioCtx) return;
+  const now = audioCtx.currentTime;
+  if (now - lastHitSound < 0.045) return;   // 連打防止
+  lastHitSound = now;
+  const vol = Math.min(0.5, strength * 0.08);
+  if (vol < 0.02) return;
+  const dur = 0.09;
+  const buf = audioCtx.createBuffer(1, audioCtx.sampleRate * dur, audioCtx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = (Math.random()*2-1) * Math.pow(1 - i/d.length, 2.5);
+  const src = audioCtx.createBufferSource(); src.buffer = buf;
+  const filter = audioCtx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.value = 500 + Math.random()*400;
+  const g = audioCtx.createGain(); g.gain.value = vol;
+  src.connect(filter).connect(g).connect(audioCtx.destination);
+  src.start();
+}
+function playTone(freq, dur, type='sine', vol=0.25, when=0) {
+  if (!audioCtx) return;
+  const t = audioCtx.currentTime + when;
+  const o = audioCtx.createOscillator(); o.type = type; o.frequency.value = freq;
+  const g = audioCtx.createGain();
+  g.gain.setValueAtTime(vol, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  o.connect(g).connect(audioCtx.destination);
+  o.start(t); o.stop(t + dur);
+}
+function playLaunch()   { playTone(220, 0.25, 'triangle', 0.3); playTone(440, 0.18, 'triangle', 0.2, 0.05); }
+function playCrumble()  { playTone(330, 0.12, 'square', 0.15); }          // 1個崩れた
+function playFanfare()  { [523,659,784,1047].forEach((f,i)=>playTone(f,0.35,'triangle',0.3,i*0.13)); }
+function playPlace()    { playTone(660, 0.1, 'sine', 0.3); }
+
+/* =========================================================
+   共通：積み木の生成
+========================================================= */
+const BLOCK = { w:2.0, h:0.6, d:0.6 };
+const COLORS = [0xef476f, 0xf78c6b, 0xffd166, 0x06d6a0, 0x118ab2, 0x9b5de5];
+const boxGeo = new THREE.BoxGeometry(BLOCK.w, BLOCK.h, BLOCK.d);
+const blockMats = COLORS.map(c => new THREE.MeshLambertMaterial({ color:c }));
+const halfExtents = new CANNON.Vec3(BLOCK.w/2, BLOCK.h/2, BLOCK.d/2);
+const boxShape = new CANNON.Box(halfExtents);
+
+let blocks = [];   // { mesh, body, initPos, initQuat, fallen }
+let balls  = [];   // { mesh, body, born }
+
+function makeBlock(x, y, z, rotY, colorIdx) {
+  const mesh = new THREE.Mesh(boxGeo, blockMats[colorIdx % blockMats.length]);
+  mesh.castShadow = mesh.receiveShadow = true;
+  scene.add(mesh);
+  const body = new CANNON.Body({ mass:1, shape:boxShape, material:matBlock });
+  body.position.set(x, y, z);
+  body.quaternion.setFromEuler(0, rotY, 0);
+  body.allowSleep = true;
+  body.sleepSpeedLimit = 0.2;
+  body.sleepTimeLimit  = 0.4;
+  body.linearDamping = 0.01;
+  body.angularDamping = 0.01;
+  // ぶつかった音
+  body.addEventListener('collide', (e) => {
+    const v = Math.abs(e.contact.getImpactVelocityAlongNormal());
+    if (v > 1.2) playHit(v);
+  });
+  world.addBody(body);
+  const b = {
+    mesh, body,
+    initPos: new CANNON.Vec3().copy(body.position),
+    initQuat: new CANNON.Quaternion().copy(body.quaternion),
+    fallen: false
+  };
+  blocks.push(b);
+  return b;
+}
+
+function clearBlocks() {
+  blocks.forEach(b => { world.removeBody(b.body); scene.remove(b.mesh); });
+  blocks = [];
+}
+function clearBalls() {
+  balls.forEach(b => { world.removeBody(b.body); scene.remove(b.mesh); });
+  balls = [];
+}
+
+/* =========================================================
+   くずすモード：タワー生成（8段×3本＝24個）
+========================================================= */
+const TOWER_LAYERS = 8;
+function buildTower() {
+  clearBlocks();
+  clearBalls();
+  const gap = 0.66;   // 積み木同士のすき間（横並び間隔）
+  for (let layer = 0; layer < TOWER_LAYERS; layer++) {
+    const y = 0.3 + BLOCK.h/2 + layer * (BLOCK.h + 0.002); // 台座上 わずかな遊び
+    const rotY = (layer % 2 === 0) ? 0 : Math.PI/2;
+    for (let i = -1; i <= 1; i++) {
+      const off = i * gap;
+      const x = (layer % 2 === 0) ? 0 : off;
+      const z = (layer % 2 === 0) ? off : 0;
+      makeBlock(x, y, z, rotY, layer % COLORS.length);
+    }
+  }
+  // 安定させるため、数ステップだけ静かに馴染ませてから強制スリープ
+  for (let i = 0; i < 30; i++) world.step(1/60);
+  blocks.forEach(b => {
+    b.body.velocity.setZero();
+    b.body.angularVelocity.setZero();
+    b.initPos.copy(b.body.position);
+    b.initQuat.copy(b.body.quaternion);
+    b.body.sleep();                      // ← 初期はスリープ状態で完全静止
+    b.mesh.position.copy(b.body.position);
+    b.mesh.quaternion.copy(b.body.quaternion);
+  });
+}
+
+/* 崩壊判定：初期位置からの変位 or 傾き */
+const FALL_DIST = 0.55;
+const FALL_TILT = Math.cos(25 * Math.PI/180);
+const upLocal = new CANNON.Vec3(0,1,0);
+const upWorld = new CANNON.Vec3();
+function updateFallen() {
+  let changed = 0;
+  for (const b of blocks) {
+    if (b.fallen) continue;
+    const d = b.body.position.distanceTo(b.initPos);
+    b.body.quaternion.vmult(upLocal, upWorld);
+    // 初期回転からの up ベクトル比較（初期が回転していても y-up は共通）
+    const tiltOK = upWorld.y >= FALL_TILT;
+    if (d > FALL_DIST || !tiltOK) {
+      b.fallen = true;
+      changed++;
+    }
+  }
+  return changed;
+}
+
+/* =========================================================
+   ボール発射（ドラッグで角度と強さ）
+========================================================= */
+const ballGeo = new THREE.SphereGeometry(0.55, 24, 16);
+const ballMat = new THREE.MeshLambertMaterial({ color:0xff5d8f });
+const ballShape = new CANNON.Sphere(0.55);
+const BALL_START = new THREE.Vector3(0, 1.0, 13);
+
+// ドラッグ量 → 発射初速（m/s）
+function launchVelocity(dirX, dirUp, power) {
+  return new THREE.Vector3(
+    dirX * power * 0.25,
+    2.5 + dirUp * power * 0.3,
+    -(6 + power * 0.55)
+  );
+}
+
+function fireBall(dirX, dirUp, power) {
+  const mesh = new THREE.Mesh(ballGeo, ballMat);
+  mesh.castShadow = true;
+  scene.add(mesh);
+  const body = new CANNON.Body({ mass:4, shape:ballShape, material:matBall });
+  body.position.set(BALL_START.x, BALL_START.y, BALL_START.z);
+  body.allowSleep = true;
+  body.sleepSpeedLimit = 0.3;
+  body.sleepTimeLimit = 1;
+  // 衝突した瞬間、相手の積み木を起こす
+  body.addEventListener('collide', (e) => {
+    if (e.body && e.body.material === matBlock) e.body.wakeUp();
+    const v = Math.abs(e.contact.getImpactVelocityAlongNormal());
+    if (v > 1.5) playHit(v * 1.3);
+  });
+  world.addBody(body);
+  // 速度ベースで計算し、質量を掛けて applyImpulse
+  const vel = launchVelocity(dirX, dirUp, power);
+  body.applyImpulse(new CANNON.Vec3(vel.x, vel.y, vel.z).scale(body.mass), body.position);
+  balls.push({ mesh, body, born: performance.now() });
+  playLaunch();
+}
+
+/* 照準の矢印表示 */
+const aimGroup = new THREE.Group();
+scene.add(aimGroup);
+const aimLineMat = new THREE.LineBasicMaterial({ color:0xffffff, linewidth:3 });
+let aimLine = null;
+function showAim(dirX, dirUp, power) {
+  aimGroup.clear();
+  const pts = [];
+  // 簡易軌道予測
+  const p = BALL_START.clone();
+  const vel = launchVelocity(dirX, dirUp, power);
+  for (let t = 0; t < 14; t++) {
+    pts.push(p.clone());
+    p.addScaledVector(vel, 0.09);
+    vel.y -= 9.82 * 0.09;
+    if (p.y < 0.3) break;
+  }
+  aimLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), aimLineMat);
+  aimGroup.add(aimLine);
+}
+function hideAim() { aimGroup.clear(); }
+
+/* =========================================================
+   つむモード
+========================================================= */
+let heldBlock = null;      // ドラッグ中の積み木
+let holdRotY = 0;
+const raycaster = new THREE.Raycaster();
+const dragPlane = new THREE.Plane(new THREE.Vector3(0,1,0), 0); // y=定数の水平面
+const ndc = new THREE.Vector2();
+const hitPoint = new THREE.Vector3();
+
+function currentTopY() {
+  let top = 0.3;
+  for (const b of blocks) {
+    if (b === heldBlock) continue;
+    if (b.body.sleepState === CANNON.Body.SLEEPING || b.body.velocity.lengthSquared() < 0.05) {
+      top = Math.max(top, b.body.position.y + BLOCK.h/2);
+    }
+  }
+  return top;
+}
+
+function spawnHeldBlock() {
+  if (heldBlock) return;
+  const y = currentTopY() + 1.6;
+  const b = makeBlock(0, y, 0, holdRotY, blocks.length % COLORS.length);
+  b.body.type = CANNON.Body.KINEMATIC;   // ドラッグ中は運動学的に固定
+  b.body.velocity.setZero();
+  heldBlock = b;
+  playPlace();
+}
+function moveHeldBlock(clientX, clientY) {
+  if (!heldBlock) return;
+  ndc.set((clientX / window.innerWidth) * 2 - 1, -(clientY / window.innerHeight) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+  const y = currentTopY() + 1.6;
+  dragPlane.constant = -y;               // plane: n·p + c = 0 → y平面
+  if (raycaster.ray.intersectPlane(dragPlane, hitPoint)) {
+    const x = THREE.MathUtils.clamp(hitPoint.x, -5, 5);
+    const z = THREE.MathUtils.clamp(hitPoint.z, -5, 5);
+    heldBlock.body.position.set(x, y, z);
+    heldBlock.body.quaternion.setFromEuler(0, holdRotY, 0);
+  }
+}
+function dropHeldBlock() {
+  if (!heldBlock) return;
+  heldBlock.body.type = CANNON.Body.DYNAMIC;
+  heldBlock.body.mass = 1;
+  heldBlock.body.updateMassProperties();
+  heldBlock.body.wakeUp();
+  heldBlock = null;
+  playPlace();
+}
+function rotateHeldBlock() {
+  holdRotY = (holdRotY + Math.PI/4) % (Math.PI*2);
+  if (heldBlock) heldBlock.body.quaternion.setFromEuler(0, holdRotY, 0);
+  playTone(880, 0.08, 'sine', 0.2);
+}
+function measureTowerHeight() {
+  let top = 0.3;
+  for (const b of blocks) {
+    if (b.body.position.y > 0 && b.body.velocity.lengthSquared() < 0.1) {
+      top = Math.max(top, b.body.position.y + BLOCK.h/2);
+    }
+  }
+  return Math.max(0, top - 0.3);   // 台座の上からの高さ
+}
+
+/* =========================================================
+   ゲーム状態管理
+========================================================= */
+const HS_KEY_KUZUSU = 'tsumikiKuzushi_hs_kuzusu';
+const HS_KEY_TSUMU  = 'tsumikiKuzushi_hs_tsumu';
+function loadHS(key) { try { return Number(localStorage.getItem(key)) || 0; } catch(e){ return 0; } }
+function saveHS(key, v) { try { localStorage.setItem(key, String(v)); } catch(e){} }
+
+let mode = null;            // 'kuzusu' | 'tsumu' | null
+let fallenCount = 0;
+let ballsLeft = 5;
+let waitingSettle = false;  // 全球投げ終わって静止待ち
+let settleTimer = 0;
+let tsumuTimeLeft = 60;
+let tsumuRunning = false;
+
+const $ = id => document.getElementById(id);
+const screens = { title: $('screen-title'), result: $('screen-result') };
+
+function show(el, on) { el.classList.toggle('hidden', !on); }
+function setDisplay(id, v) { $(id).style.display = v; }
+
+function updateTitleHS() {
+  $('title-hiscore').textContent =
+    `ハイスコア　くずす：${loadHS(HS_KEY_KUZUSU)}こ　／　つむ：${loadHS(HS_KEY_TSUMU).toFixed(1)}m`;
+}
+
+function goHome() {
+  mode = null;
+  tsumuRunning = false;
+  heldBlock = null;
+  clearBlocks(); clearBalls();
+  show(screens.title, true);
+  show(screens.result, false);
+  setDisplay('hud', 'none');
+  setDisplay('bottom-bar', 'none');
+  setDisplay('spawn-btn-wrap', 'none');
+  $('aim-hint').style.display = 'none';
+  updateTitleHS();
+}
+
+function startKuzusu() {
+  mode = 'kuzusu';
+  fallenCount = 0;
+  ballsLeft = 5;
+  waitingSettle = false;
+  buildTower();
+  camera.position.set(0, 6.5, 16);
+  camera.lookAt(0, 2.5, 0);
+  show(screens.title, false);
+  show(screens.result, false);
+  setDisplay('hud', 'flex');
+  setDisplay('bottom-bar', 'flex');
+  setDisplay('spawn-btn-wrap', 'none');
+  $('aim-hint').style.display = 'block';
+  $('hud-left-label').textContent = 'のこりボール';
+  $('hud-center-label').textContent = 'くずれた数';
+  $('hud-left-value').textContent = ballsLeft;
+  $('hud-center-value').textContent = '0';
+  $('hud-right-value').textContent = loadHS(HS_KEY_KUZUSU);
+}
+
+function resetTower() {   // もう一回積む（スコアは続行、ボールは補充）
+  if (mode !== 'kuzusu') return;
+  buildTower();
+  ballsLeft = 5;
+  fallenCount = 0;
+  waitingSettle = false;
+  $('hud-left-value').textContent = ballsLeft;
+  $('hud-center-value').textContent = '0';
+  playPlace();
+}
+
+function startTsumu() {
+  mode = 'tsumu';
+  clearBlocks(); clearBalls();
+  heldBlock = null; holdRotY = 0;
+  tsumuTimeLeft = 60;
+  tsumuRunning = true;
+  camera.position.set(0, 7, 15);
+  camera.lookAt(0, 3, 0);
+  show(screens.title, false);
+  show(screens.result, false);
+  setDisplay('hud', 'flex');
+  setDisplay('bottom-bar', 'flex');
+  setDisplay('spawn-btn-wrap', 'flex');
+  $('aim-hint').style.display = 'none';
+  $('hud-left-label').textContent = 'のこり時間';
+  $('hud-center-label').textContent = 'たかさ';
+  $('hud-left-value').textContent = '60';
+  $('hud-center-value').textContent = '0.0m';
+  $('hud-right-value').textContent = loadHS(HS_KEY_TSUMU).toFixed(1) + 'm';
+}
+
+function endKuzusu() {
+  const hs = loadHS(HS_KEY_KUZUSU);
+  const isNew = fallenCount > hs;
+  if (isNew) saveHS(HS_KEY_KUZUSU, fallenCount);
+  $('result-title').textContent = 'けっか はっぴょう！';
+  $('result-detail').innerHTML = `くずれた つみき<br><span style="font-size:44px;color:#ffd166;">${fallenCount}こ</span>`;
+  show($('result-newrecord'), isNew);
+  if (isNew || fallenCount >= 15) playFanfare();
+  show(screens.result, true);
+  setDisplay('bottom-bar', 'none');
+  $('aim-hint').style.display = 'none';
+  mode = null;
+}
+
+function endTsumu() {
+  tsumuRunning = false;
+  if (heldBlock) dropHeldBlock();
+  const h = Math.round(measureTowerHeight() * 10) / 10;
+  const hs = loadHS(HS_KEY_TSUMU);
+  const isNew = h > hs;
+  if (isNew) saveHS(HS_KEY_TSUMU, h);
+  $('result-title').textContent = 'タイムアップ！';
+  $('result-detail').innerHTML = `タワーの たかさ<br><span style="font-size:44px;color:#ffd166;">${h.toFixed(1)}m</span>`;
+  show($('result-newrecord'), isNew);
+  if (isNew) playFanfare();
+  show(screens.result, true);
+  setDisplay('bottom-bar', 'none');
+  setDisplay('spawn-btn-wrap', 'none');
+  const endedMode = 'tsumu';
+  mode = null;
+  lastMode = endedMode;
+}
+
+let lastMode = 'kuzusu';
+
+/* =========================================================
+   入力（タッチ／マウス統一）
+========================================================= */
+let dragStart = null;
+let dragMoved = false;
+
+function pt(e) {
+  if (e.changedTouches && e.changedTouches.length) {
+    return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
+  }
+  return { x: e.clientX, y: e.clientY };
+}
+
+function onDown(e) {
+  ensureAudio();
+  if (e.target.closest('.btn') || e.target.closest('.screen')) return;
+  e.preventDefault();
+  const p = pt(e);
+  dragStart = p;
+  dragMoved = false;
+  if (mode === 'tsumu' && heldBlock) moveHeldBlock(p.x, p.y);
+}
+function onMove(e) {
+  if (!dragStart) return;
+  e.preventDefault();
+  const p = pt(e);
+  const dx = p.x - dragStart.x, dy = p.y - dragStart.y;
+  if (Math.hypot(dx, dy) > 12) dragMoved = true;
+
+  if (mode === 'kuzusu' && ballsLeft > 0 && !waitingSettle) {
+    if (dragMoved) {
+      const power = THREE.MathUtils.clamp(Math.hypot(dx, dy) / 10, 4, 34);
+      const dirX = THREE.MathUtils.clamp(-dx / 60, -3, 3);
+      const dirUp = THREE.MathUtils.clamp(dy / 120, 0, 2.2);
+      showAim(dirX, dirUp, power);
+      dragStart.aim = { dirX, dirUp, power };
+    }
+  } else if (mode === 'tsumu' && heldBlock) {
+    moveHeldBlock(p.x, p.y);
+  }
+}
+function onUp(e) {
+  if (!dragStart) return;
+  e.preventDefault();
+  const aim = dragStart.aim;
+  const wasDrag = dragMoved;
+  dragStart = null;
+  hideAim();
+
+  if (mode === 'kuzusu') {
+    if (wasDrag && aim && ballsLeft > 0 && !waitingSettle) {
+      fireBall(aim.dirX, aim.dirUp, aim.power);
+      ballsLeft--;
+      $('hud-left-value').textContent = ballsLeft;
+      if (ballsLeft === 0) { waitingSettle = true; settleTimer = 0; }
+    }
+  } else if (mode === 'tsumu') {
+    if (heldBlock) {
+      if (wasDrag) dropHeldBlock();
+      else rotateHeldBlock();          // タップで45°回転
+    }
+  }
+}
+canvas.addEventListener('touchstart', onDown, { passive:false });
+canvas.addEventListener('touchmove',  onMove, { passive:false });
+canvas.addEventListener('touchend',   onUp,   { passive:false });
+canvas.addEventListener('mousedown', onDown);
+window.addEventListener('mousemove', onMove);
+window.addEventListener('mouseup',   onUp);
+
+// ダブルタップズーム防止
+let lastTouchEnd = 0;
+document.addEventListener('touchend', (e) => {
+  const now = Date.now();
+  if (now - lastTouchEnd < 350) e.preventDefault();
+  lastTouchEnd = now;
+}, { passive:false });
+document.addEventListener('gesturestart', e => e.preventDefault());
+
+/* ボタン */
+$('btn-mode-kuzusu').addEventListener('click', () => { ensureAudio(); lastMode='kuzusu'; startKuzusu(); });
+$('btn-mode-tsumu').addEventListener('click',  () => { ensureAudio(); lastMode='tsumu';  startTsumu(); });
+$('btn-reset').addEventListener('click', () => {
+  ensureAudio();
+  if (mode === 'kuzusu') resetTower();
+  else if (mode === 'tsumu') { startTsumu(); }
+});
+$('btn-home').addEventListener('click', goHome);
+$('btn-result-home').addEventListener('click', goHome);
+$('btn-retry').addEventListener('click', () => {
+  ensureAudio();
+  if (lastMode === 'tsumu') startTsumu(); else startKuzusu();
+});
+$('btn-spawn').addEventListener('click', () => { ensureAudio(); spawnHeldBlock(); });
+
+/* =========================================================
+   メインループ
+========================================================= */
+const clock = new THREE.Clock();
+let tsumuTickAcc = 0;
+
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 1/30);   // 120Hz iPad対応クランプ
+
+  world.step(1/60, dt, 3);
+
+  // 同期
+  for (const b of blocks) {
+    b.mesh.position.copy(b.body.position);
+    b.mesh.quaternion.copy(b.body.quaternion);
+  }
+  for (const b of balls) {
+    b.mesh.position.copy(b.body.position);
+    b.mesh.quaternion.copy(b.body.quaternion);
+  }
+  // 古いボール・落ちたボールを掃除
+  const now = performance.now();
+  for (let i = balls.length - 1; i >= 0; i--) {
+    const b = balls[i];
+    if (now - b.born > 9000 || b.body.position.y < -5) {
+      world.removeBody(b.body); scene.remove(b.mesh);
+      balls.splice(i, 1);
+    }
+  }
+
+  if (mode === 'kuzusu') {
+    const newlyFallen = updateFallen();
+    if (newlyFallen > 0) {
+      fallenCount += newlyFallen;
+      $('hud-center-value').textContent = fallenCount;
+      playCrumble();
+    }
+    if (waitingSettle) {
+      settleTimer += dt;
+      const allCalm = blocks.every(b =>
+        b.body.sleepState === CANNON.Body.SLEEPING || b.body.velocity.lengthSquared() < 0.04
+      ) && balls.every(b => b.body.velocity.lengthSquared() < 0.1 || b.body.position.y < 0.7);
+      if ((allCalm && settleTimer > 1.5) || settleTimer > 6) {
+        waitingSettle = false;
+        updateFallen();
+        endKuzusu();
+      }
+    }
+  } else if (mode === 'tsumu' && tsumuRunning) {
+    tsumuTickAcc += dt;
+    if (tsumuTickAcc >= 0.25) {
+      tsumuTickAcc = 0;
+      $('hud-center-value').textContent = measureTowerHeight().toFixed(1) + 'm';
+    }
+    tsumuTimeLeft -= dt;
+    $('hud-left-value').textContent = Math.max(0, Math.ceil(tsumuTimeLeft));
+    if (tsumuTimeLeft <= 0) endTsumu();
+  }
+
+  renderer.render(scene, camera);
+}
+
+/* =========================================================
+   テスト用フック（本番でも無害）
+========================================================= */
+window.__game = {
+  startKuzusu, startTsumu, fireBall, buildTower,
+  get blocks(){ return blocks; },
+  get fallenCount(){ return fallenCount; },
+  get mode(){ return mode; },
+  measureTowerHeight,
+  ballPos() {
+    return balls.map(b => ({ x:+b.body.position.x.toFixed(2), y:+b.body.position.y.toFixed(2), z:+b.body.position.z.toFixed(2) }));
+  },
+  blockStates() {
+    return blocks.map(b => ({
+      y: b.body.position.y,
+      disp: b.body.position.distanceTo(b.initPos),
+      sleeping: b.body.sleepState === CANNON.Body.SLEEPING,
+      fallen: b.fallen
+    }));
+  }
+};
+
+resize();
+camera.position.set(0, 6.5, 16);
+camera.lookAt(0, 2.5, 0);
+animate();
+</script>
+</body>
+</html>
