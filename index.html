@@ -192,15 +192,8 @@
 
 <div id="bottom-bar">
 
-  <!-- くずすモード：発射コントローラー -->
+  <!-- くずすモード：むき選択＋つみかた変更（発射はドラッグ） -->
   <div class="ctrl-group" id="kuzusu-controls">
-    <div class="cluster">
-      <div class="cluster-label">いち</div>
-      <div class="cluster-row">
-        <button class="pad" id="aim-pos-l">◀</button>
-        <button class="pad" id="aim-pos-r">▶</button>
-      </div>
-    </div>
     <div class="cluster">
       <div class="cluster-label">むき</div>
       <div class="cluster-row">
@@ -209,13 +202,9 @@
       </div>
     </div>
     <div class="cluster">
-      <div class="cluster-label">たかさ</div>
-      <div class="cluster-row">
-        <button class="pad pad-green" id="aim-h-up">▲</button>
-        <button class="pad pad-green" id="aim-h-dn">▼</button>
-      </div>
+      <div class="cluster-label" id="pattern-label">つみかた：ていばん</div>
+      <button class="act-btn act-rotate" id="btn-pattern" style="min-width:120px;">かえる</button>
     </div>
-    <button class="fire-btn" id="btn-fire">なげる！</button>
   </div>
 
   <!-- つむモード：ジョイスティック＋回転・落とす＋視点 -->
@@ -454,23 +443,31 @@ function clearBalls() {
 }
 
 /* =========================================================
-   くずすモード：タワー生成（8段×3本＝24個）
+   くずすモード：タワー生成（複数パターンから選択）
 ========================================================= */
-const TOWER_LAYERS = 8;
+const TOWER_PATTERNS = [
+  { name: 'ていばん',     layers: [3,3,3,3,3,3,3,3] },   // 交互3本組・8段（従来どおり）
+  { name: 'ピラミッド',   layers: [4,4,3,3,2,2,1] },     // 下ほど広い・上ほど狭い
+  { name: 'いっぽんばしら', layers: [1,1,1,1,1,1,1,1,1,1] }, // 1個ずつ・10段の高い柱
+];
+let towerPatternIndex = 0;
+
 function buildTower() {
   clearBlocks();
   clearBalls();
+  const layerCounts = TOWER_PATTERNS[towerPatternIndex].layers;
   const gap = 0.66;   // 積み木同士のすき間（横並び間隔）
-  for (let layer = 0; layer < TOWER_LAYERS; layer++) {
+  layerCounts.forEach((count, layer) => {
     const y = 0.3 + BLOCK.h/2 + layer * (BLOCK.h + 0.002); // 台座上 わずかな遊び
     const rotY = (layer % 2 === 0) ? 0 : Math.PI/2;
-    for (let i = -1; i <= 1; i++) {
-      const off = i * gap;
+    const start = -(count - 1) / 2 * gap;
+    for (let i = 0; i < count; i++) {
+      const off = start + i * gap;
       const x = (layer % 2 === 0) ? 0 : off;
       const z = (layer % 2 === 0) ? off : 0;
       makeBlock(x, y, z, rotY, layer % COLORS.length);
     }
-  }
+  });
   // 安定させるため、数ステップだけ静かに馴染ませてから強制スリープ
   for (let i = 0; i < 30; i++) world.step(1/60);
   blocks.forEach(b => {
@@ -482,6 +479,13 @@ function buildTower() {
     b.mesh.position.copy(b.body.position);
     b.mesh.quaternion.copy(b.body.quaternion);
   });
+}
+
+function cyclePattern() {
+  towerPatternIndex = (towerPatternIndex + 1) % TOWER_PATTERNS.length;
+  $('pattern-label').textContent = 'つみかた：' + TOWER_PATTERNS[towerPatternIndex].name;
+  resetTower();
+  updateHint();
 }
 
 /* 崩壊判定：初期位置からの変位 or 傾き */
@@ -506,39 +510,34 @@ function updateFallen() {
 }
 
 /* =========================================================
-   ボール発射（コントローラー：位置・むき・たかさ）
+   ボール発射（むきはボタンで選択／ちから・たかさ はドラッグ）
 ========================================================= */
 const ballGeo = new THREE.SphereGeometry(0.55, 24, 16);
 const ballMat = new THREE.MeshLambertMaterial({ color:0xff5d8f });
 const ballShape = new CANNON.Sphere(0.55);
-const BALL_START_Z = 13;
-const BALL_START_Y = 1.0;
+const BALL_START = new THREE.Vector3(0, 1.0, 13);   // 発射位置は中央固定
 
-// 発射コントローラーの状態
-const aim = { posX: 0, angleDeg: 0, height: 0.45 };  // posX:-3〜3 angle:-32〜32 height:0〜1
-const AIM_LIMITS = { posX:[-3, 3], angleDeg:[-32, 32], height:[0, 1] };
-const FIRE_SPEED = 17;   // 前方への基本速度
+// 発射状態：angleDeg はボタンで選択、power/height はドラッグで決まる
+const aim = { angleDeg: 0, power: 16, height: 1.1 };
+const AIM_LIMITS = { angleDeg: [-35, 35] };
 
-function aimStartPos() {
-  return new THREE.Vector3(aim.posX, BALL_START_Y, BALL_START_Z);
-}
 function aimVelocity() {
   const ang = aim.angleDeg * Math.PI/180;
+  const power = aim.power;
   return new THREE.Vector3(
-    Math.sin(ang) * FIRE_SPEED,
-    2 + aim.height * 7,
-    -Math.cos(ang) * FIRE_SPEED
+    Math.sin(ang) * power * 0.3,
+    2.5 + aim.height * power * 0.3,
+    -(6 + power * 0.55)
   );
 }
 
 function fireBall() {
   if (mode !== 'kuzusu' || ballsLeft <= 0 || waitingSettle) return;
-  const start = aimStartPos();
   const mesh = new THREE.Mesh(ballGeo, ballMat);
   mesh.castShadow = true;
   scene.add(mesh);
   const body = new CANNON.Body({ mass:4, shape:ballShape, material:matBall });
-  body.position.set(start.x, start.y, start.z);
+  body.position.set(BALL_START.x, BALL_START.y, BALL_START.z);
   body.allowSleep = true;
   body.sleepSpeedLimit = 0.3;
   body.sleepTimeLimit = 1;
@@ -556,11 +555,9 @@ function fireBall() {
   ballsLeft--;
   $('hud-left-value').textContent = ballsLeft;
   if (ballsLeft === 0) { waitingSettle = true; settleTimer = 0; }
-  updateFireBtn();
-  updateAimPreview();
 }
 
-/* 照準プレビュー：発射位置マーカー＋軌道の点線 */
+/* 照準プレビュー：発射位置マーカー＋軌道の点線（むき変更・ドラッグ中に表示） */
 const aimGroup = new THREE.Group();
 scene.add(aimGroup);
 const aimLineMat = new THREE.LineDashedMaterial({ color:0xffffff, dashSize:0.5, gapSize:0.35 });
@@ -570,14 +567,11 @@ const aimMarkerGeo = new THREE.SphereGeometry(0.5, 16, 12);
 function updateAimPreview() {
   aimGroup.clear();
   if (mode !== 'kuzusu' || ballsLeft <= 0 || waitingSettle) return;
-  const start = aimStartPos();
-  // 発射位置マーカー
   const marker = new THREE.Mesh(aimMarkerGeo, aimMarkerMat);
-  marker.position.copy(start);
+  marker.position.copy(BALL_START);
   aimGroup.add(marker);
-  // 軌道予測
   const pts = [];
-  const p = start.clone();
+  const p = BALL_START.clone();
   const vel = aimVelocity();
   for (let t = 0; t < 22; t++) {
     pts.push(p.clone());
@@ -590,10 +584,6 @@ function updateAimPreview() {
   aimGroup.add(line);
 }
 function hideAim() { aimGroup.clear(); }
-function updateFireBtn() {
-  const btn = $('btn-fire');
-  if (btn) btn.disabled = (ballsLeft <= 0 || waitingSettle);
-}
 
 /* =========================================================
    つむモード（ジョイスティックで移動・回転・落とす）
@@ -751,7 +741,7 @@ function startKuzusu() {
   fallenCount = 0;
   ballsLeft = 5;
   waitingSettle = false;
-  aim.posX = 0; aim.angleDeg = 0; aim.height = 0.45;
+  aim.angleDeg = 0; aim.power = 16; aim.height = 1.1;
   buildTower();
   camera.position.set(0, 6.5, 16);   // くずすは固定視点
   camera.lookAt(0, 2.5, 0);
@@ -760,15 +750,20 @@ function startKuzusu() {
   setDisplay('hud', 'flex');
   setDisplay('bottom-bar', 'flex');
   setCtrlGroup('kuzusu');
-  $('hint-bar').textContent = 'いち・むき・たかさ を あわせて「なげる！」';
-  $('hint-bar').style.display = 'block';
+  $('pattern-label').textContent = 'つみかた：' + TOWER_PATTERNS[towerPatternIndex].name;
+  updateHint();
   $('hud-left-label').textContent = 'のこりボール';
   $('hud-center-label').textContent = 'くずれた数';
   $('hud-left-value').textContent = ballsLeft;
   $('hud-center-value').textContent = '0';
   $('hud-right-value').textContent = loadHS(HS_KEY_KUZUSU);
-  updateFireBtn();
   updateAimPreview();
+}
+
+function updateHint() {
+  if (mode !== 'kuzusu') return;
+  $('hint-bar').textContent = `したから ゆびで ひっぱって はなすと ボールが とぶよ！（${TOWER_PATTERNS[towerPatternIndex].name}）`;
+  $('hint-bar').style.display = 'block';
 }
 
 function resetTower() {   // もう一回積む（スコアは続行、ボールは補充）
@@ -777,10 +772,9 @@ function resetTower() {   // もう一回積む（スコアは続行、ボール
   ballsLeft = 5;
   fallenCount = 0;
   waitingSettle = false;
-  aim.posX = 0; aim.angleDeg = 0; aim.height = 0.45;
+  aim.angleDeg = 0; aim.power = 16; aim.height = 1.1;
   $('hud-left-value').textContent = ballsLeft;
   $('hud-center-value').textContent = '0';
-  updateFireBtn();
   updateAimPreview();
   playPlace();
 }
@@ -858,7 +852,7 @@ let lastMode = 'kuzusu';
    入力：コントローラー
 ========================================================= */
 // キャンバスは初回タップで音声を有効化するだけ（視点・発射はボタンで）
-canvas.addEventListener('pointerdown', () => ensureAudio());
+// キャンバスの発射操作はドラッグ（下記）で処理。音声有効化は onCanvasDown 内で実施。
 
 // ダブルタップズーム防止
 let lastTouchEnd = 0;
@@ -892,19 +886,60 @@ function bindTap(id, fn) {
   btn.addEventListener('click', () => { ensureAudio(); fn(); });
 }
 
-/* --- くずすモード：発射コントローラー --- */
+/* --- くずすモード：むき選択（ボタン）＋つみかた変更 --- */
 function adjustAim(key, delta) {
   const [lo, hi] = AIM_LIMITS[key];
   aim[key] = THREE.MathUtils.clamp(aim[key] + delta, lo, hi);
   updateAimPreview();
 }
-bindHold('aim-pos-l', () => adjustAim('posX', -0.18));
-bindHold('aim-pos-r', () => adjustAim('posX',  0.18));
 bindHold('aim-ang-l', () => adjustAim('angleDeg', -1.6));
 bindHold('aim-ang-r', () => adjustAim('angleDeg',  1.6));
-bindHold('aim-h-up',  () => adjustAim('height',  0.04));
-bindHold('aim-h-dn',  () => adjustAim('height', -0.04));
-bindTap('btn-fire', () => fireBall());
+bindTap('btn-pattern', () => cyclePattern());
+
+/* --- くずすモード：ドラッグで「ちから・たかさ」を決めて発射 --- */
+let dragStart = null;
+let dragMoved = false;
+
+function pt(e) {
+  if (e.changedTouches && e.changedTouches.length) {
+    return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
+  }
+  return { x: e.clientX, y: e.clientY };
+}
+function onCanvasDown(e) {
+  ensureAudio();
+  if (mode !== 'kuzusu' || ballsLeft <= 0 || waitingSettle) return;
+  e.preventDefault();
+  dragStart = pt(e);
+  dragMoved = false;
+}
+function onCanvasMove(e) {
+  if (!dragStart) return;
+  e.preventDefault();
+  const p = pt(e);
+  const dx = p.x - dragStart.x, dy = p.y - dragStart.y;
+  if (Math.hypot(dx, dy) > 12) dragMoved = true;
+  if (dragMoved) {
+    aim.power  = THREE.MathUtils.clamp(Math.hypot(dx, dy) / 10, 4, 34);
+    aim.height = THREE.MathUtils.clamp(dy / 120, 0, 2.2);
+    updateAimPreview();
+  }
+}
+function onCanvasUp(e) {
+  if (!dragStart) return;
+  e.preventDefault();
+  const wasDrag = dragMoved;
+  dragStart = null;
+  if (mode === 'kuzusu' && wasDrag && ballsLeft > 0 && !waitingSettle) {
+    fireBall();
+  }
+}
+canvas.addEventListener('touchstart', onCanvasDown, { passive:false });
+canvas.addEventListener('touchmove',  onCanvasMove, { passive:false });
+canvas.addEventListener('touchend',   onCanvasUp,   { passive:false });
+canvas.addEventListener('mousedown', onCanvasDown);
+window.addEventListener('mousemove', onCanvasMove);
+window.addEventListener('mouseup',   onCanvasUp);
 
 /* --- つむモード：回転・落とす・視点 --- */
 bindTap('btn-rotate', () => { if (heldBlock) rotateHeldBlock(); });
@@ -1039,10 +1074,12 @@ function animate() {
    テスト用フック（本番でも無害）
 ========================================================= */
 window.__game = {
-  startKuzusu, startTsumu, buildTower, fireBall,
+  startKuzusu, startTsumu, buildTower, fireBall, cyclePattern,
   spawnHeldBlock, dropHeldBlock, rotateHeldBlock,
   setAim(o) { Object.assign(aim, o); updateAimPreview(); },
   getAim() { return { ...aim }; },
+  get towerPattern(){ return TOWER_PATTERNS[towerPatternIndex].name; },
+  get towerPatternIndex(){ return towerPatternIndex; },
   nudgeHeld(dx, dz) { heldX = THREE.MathUtils.clamp(heldX+dx, -PLACE_LIMIT, PLACE_LIMIT); heldZ = THREE.MathUtils.clamp(heldZ+dz, -PLACE_LIMIT, PLACE_LIMIT); },
   rotateView, resetView,
   get camOrbit(){ return { ...camOrbit }; },
