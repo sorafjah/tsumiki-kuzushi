@@ -7,7 +7,7 @@
 <title>つみきタワーくずし</title>
 <link href="https://fonts.googleapis.com/css2?family=BIZ+UDPGothic:wght@400;700&display=swap" rel="stylesheet">
 <style>
-  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; -webkit-touch-callout:none; }
   html, body {
     width:100%; height:100dvh; overflow:hidden;
     font-family:'BIZ UDPGothic', sans-serif;
@@ -60,12 +60,11 @@
   .newrecord { color:#ff6b9d; font-size:26px; font-weight:700; animation:pop .6s infinite alternate; }
   @keyframes pop { from{transform:scale(1)} to{transform:scale(1.12)} }
 
-  /* ===== 下部コントローラーバー ===== */
+  /* ===== 下部コントローラーバー（背景なし＝3Dシーンが透けて見える） ===== */
   #bottom-bar {
     position:fixed; left:0; right:0; bottom:0;
     min-height:164px; padding:10px 12px calc(env(safe-area-inset-bottom,0) + 10px);
-    background:rgba(18,24,46,.82); backdrop-filter:blur(6px);
-    border-top:2px solid rgba(255,255,255,.12);
+    background:transparent;
     display:none; align-items:center; gap:12px; z-index:10;
   }
   .ctrl-group { display:none; align-items:center; gap:12px; flex:1; }
@@ -73,7 +72,7 @@
 
   /* 操作クラスタ（ラベル＋ボタン） */
   .cluster { display:flex; flex-direction:column; align-items:center; gap:4px; }
-  .cluster-label { font-size:13px; color:#cfe3ff; font-weight:700; }
+  .cluster-label { font-size:13px; color:#fff; font-weight:700; text-shadow:0 1px 4px rgba(0,0,0,.8), 0 0 2px rgba(0,0,0,.8); }
   .cluster-row { display:flex; gap:6px; }
 
   /* 方向ボタン（44px以上） */
@@ -119,25 +118,8 @@
   }
   #joystick-label {
     position:absolute; left:0; right:0; bottom:-20px; text-align:center;
-    font-size:12px; color:#cfe3ff;
+    font-size:12px; color:#fff; text-shadow:0 1px 4px rgba(0,0,0,.8), 0 0 2px rgba(0,0,0,.8);
   }
-
-  /* 視点コントロール（つむモード） */
-  #view-pad {
-    display:grid;
-    grid-template-areas:". up ." "lf rs rt" ". dn .";
-    grid-template-columns:repeat(3,46px);
-    grid-template-rows:repeat(3,44px);
-    gap:4px; flex-shrink:0;
-  }
-  .vbtn {
-    border:none; border-radius:10px; background:#495a7a; color:#fff;
-    font-size:19px; cursor:pointer; display:flex; align-items:center;
-    justify-content:center; touch-action:none;
-  }
-  .vbtn:active { background:#5f74a0; }
-  #vbtn-up{grid-area:up} #vbtn-lf{grid-area:lf} #vbtn-rt{grid-area:rt}
-  #vbtn-dn{grid-area:dn} #vbtn-rs{grid-area:rs; font-size:13px; background:#6c757d;}
 
   /* 右端：もう一回／ホーム（両モード共通） */
   #side-controls {
@@ -192,22 +174,15 @@
 
 <div id="bottom-bar">
 
-  <!-- くずすモード：むき選択＋つみかた変更（発射はドラッグ） -->
+  <!-- くずすモード：つみかた変更のみ（発射はスワイプの角度＋距離） -->
   <div class="ctrl-group" id="kuzusu-controls">
-    <div class="cluster">
-      <div class="cluster-label">むき</div>
-      <div class="cluster-row">
-        <button class="pad pad-purple" id="aim-ang-l">◀</button>
-        <button class="pad pad-purple" id="aim-ang-r">▶</button>
-      </div>
-    </div>
     <div class="cluster">
       <div class="cluster-label" id="pattern-label">つみかた：ていばん</div>
       <button class="act-btn act-rotate" id="btn-pattern" style="min-width:120px;">かえる</button>
     </div>
   </div>
 
-  <!-- つむモード：ジョイスティック＋回転・落とす＋視点 -->
+  <!-- つむモード：ジョイスティック＋回転・落とす -->
   <div class="ctrl-group" id="tsumu-controls">
     <div id="joystick">
       <div id="joystick-knob"></div>
@@ -216,13 +191,6 @@
     <div class="cluster" style="gap:8px;">
       <button class="act-btn act-rotate" id="btn-rotate">まわす</button>
       <button class="act-btn act-drop" id="btn-drop">おとす</button>
-    </div>
-    <div id="view-pad">
-      <button class="vbtn" id="vbtn-up">↑</button>
-      <button class="vbtn" id="vbtn-lf">←</button>
-      <button class="vbtn" id="vbtn-rs">してん</button>
-      <button class="vbtn" id="vbtn-rt">→</button>
-      <button class="vbtn" id="vbtn-dn">↓</button>
     </div>
   </div>
 
@@ -591,8 +559,11 @@ function hideAim() { aimGroup.clear(); }
 let heldBlock = null;      // 操作中の積み木（KINEMATIC）
 let holdRotY = 0;
 let heldX = 0, heldZ = 0;  // ジョイスティックで動かす目標XZ
+let smoothVX = 0, smoothVZ = 0;  // マイルドな動きのための平滑化速度
 const joyVec = { x: 0, y: 0, active: false };  // -1〜1
-const MOVE_SPEED = 5.5;    // ジョイスティック最大移動速度 m/s
+const MOVE_SPEED = 3.0;     // ジョイスティック最大移動速度 m/s（マイルド化）
+const JOY_DEADZONE = 0.12;  // 中心付近の遊び
+const JOY_SMOOTH = 7;       // 追従の速さ（大きいほど機敏、小さいほどマイルド）
 const PLACE_LIMIT = 4.5;
 
 function currentTopY() {
@@ -609,6 +580,7 @@ function currentTopY() {
 function spawnHeldBlock() {
   if (heldBlock || mode !== 'tsumu' || !tsumuRunning) return;
   heldX = 0; heldZ = 0; holdRotY = 0;
+  smoothVX = 0; smoothVZ = 0;
   const y = currentTopY() + 1.4;
   const b = makeBlock(0, y, 0, holdRotY, blocks.length % COLORS.length);
   b.body.type = CANNON.Body.KINEMATIC;   // 操作中は運動学的に固定
@@ -617,20 +589,25 @@ function spawnHeldBlock() {
   playPlace();
 }
 
-// 毎フレーム：ジョイスティック入力を反映して held ブロックを動かす
+// 毎フレーム：ジョイスティック入力を反映して held ブロックを動かす（マイルドな加減速）
 function updateHeldBlock(dt) {
   if (!heldBlock) return;
-  if (joyVec.active && (joyVec.x !== 0 || joyVec.y !== 0)) {
-    // カメラの向きに合わせた移動（画面奥＝前）
-    const fwd = new THREE.Vector3();
-    camera.getWorldDirection(fwd);
-    fwd.y = 0; fwd.normalize();
-    const right = new THREE.Vector3(fwd.z, 0, -fwd.x); // 画面右方向
-    heldX += (right.x * joyVec.x - fwd.x * joyVec.y) * MOVE_SPEED * dt;
-    heldZ += (right.z * joyVec.x - fwd.z * joyVec.y) * MOVE_SPEED * dt;
-    heldX = THREE.MathUtils.clamp(heldX, -PLACE_LIMIT, PLACE_LIMIT);
-    heldZ = THREE.MathUtils.clamp(heldZ, -PLACE_LIMIT, PLACE_LIMIT);
+  let targetVX = 0, targetVZ = 0;
+  const mag = Math.hypot(joyVec.x, joyVec.y);
+  if (joyVec.active && mag > JOY_DEADZONE) {
+    const norm = Math.min(1, (mag - JOY_DEADZONE) / (1 - JOY_DEADZONE));
+    const eased = norm * norm;   // 緩やかな立ち上がりでマイルドな操作感に
+    const nx = joyVec.x / mag, ny = joyVec.y / mag;
+    // 固定カメラ基準の前後・左右（視点は変更されないので起動時に1回計算した値を使用）
+    targetVX = (tsumuRight.x * nx - tsumuForward.x * ny) * eased * MOVE_SPEED;
+    targetVZ = (tsumuRight.z * nx - tsumuForward.z * ny) * eased * MOVE_SPEED;
   }
+  const smoothing = 1 - Math.exp(-JOY_SMOOTH * dt);
+  smoothVX += (targetVX - smoothVX) * smoothing;
+  smoothVZ += (targetVZ - smoothVZ) * smoothing;
+  heldX = THREE.MathUtils.clamp(heldX + smoothVX * dt, -PLACE_LIMIT, PLACE_LIMIT);
+  heldZ = THREE.MathUtils.clamp(heldZ + smoothVZ * dt, -PLACE_LIMIT, PLACE_LIMIT);
+
   const y = currentTopY() + 1.4;
   heldBlock.body.position.set(heldX, y, heldZ);
   heldBlock.body.quaternion.setFromEuler(0, holdRotY, 0);
@@ -638,17 +615,34 @@ function updateHeldBlock(dt) {
   heldBlock.body.angularVelocity.setZero();
 }
 
+// 落下した積み木が落ち着くまで、次の積み木は出さない（重なりによるブルブル振動を防止）
+let pendingDropBody = null;
+let pendingDropTime = 0;
+const DROP_MIN_DELAY = 500;    // 最低でもこれだけ間を空ける（ms）
+const DROP_MAX_WAIT  = 2200;   // 万一寝ない場合の保険（ms）
+
 function dropHeldBlock() {
   if (!heldBlock) return;
   heldBlock.body.type = CANNON.Body.DYNAMIC;
   heldBlock.body.mass = 1;
   heldBlock.body.updateMassProperties();
   heldBlock.body.wakeUp();
+  pendingDropBody = heldBlock.body;
+  pendingDropTime = performance.now();
   heldBlock = null;
   playPlace();
-  // 時間が残っていれば次の積み木を出す
-  if (mode === 'tsumu' && tsumuRunning) setTimeout(spawnHeldBlock, 350);
 }
+
+function checkPendingDrop() {
+  if (!pendingDropBody || mode !== 'tsumu' || !tsumuRunning) return;
+  const elapsed = performance.now() - pendingDropTime;
+  const settled = pendingDropBody.sleepState === CANNON.Body.SLEEPING || pendingDropBody.velocity.lengthSquared() < 0.05;
+  if ((settled && elapsed > DROP_MIN_DELAY) || elapsed > DROP_MAX_WAIT) {
+    pendingDropBody = null;
+    spawnHeldBlock();
+  }
+}
+
 function rotateHeldBlock() {
   holdRotY = (holdRotY + Math.PI/4) % (Math.PI*2);
   if (heldBlock) heldBlock.body.quaternion.setFromEuler(0, holdRotY, 0);
@@ -665,23 +659,25 @@ function measureTowerHeight() {
 }
 
 /* =========================================================
-   カメラ（つむモードはオービット、くずすは固定）
+   カメラ（つむモードも固定視点／視点変更コントロールは廃止）
 ========================================================= */
 const camTarget = new THREE.Vector3(0, 3, 0);
-const camOrbit = { theta: 0.55, phi: 1.05, radius: 16 };  // つむモード用
-const VIEW_ROT = 0.05, VIEW_TILT = 0.045;
+const camOrbit = { theta: 0.55, phi: 1.05, radius: 16 };  // つむモード用の固定アングル
+let tsumuForward = new THREE.Vector3(0, 0, -1);
+let tsumuRight   = new THREE.Vector3(1, 0, 0);
 
 function applyOrbit() {
   const off = new THREE.Vector3().setFromSphericalCoords(camOrbit.radius, camOrbit.phi, camOrbit.theta);
   camera.position.copy(camTarget).add(off);
   camera.lookAt(camTarget);
+  // ジョイスティックの前後・左右は、この固定カメラを基準に一度だけ計算する
+  const fwd = new THREE.Vector3();
+  camera.getWorldDirection(fwd);
+  fwd.y = 0; fwd.normalize();
+  tsumuForward.copy(fwd);
+  tsumuRight.set(-fwd.z, 0, fwd.x);   // 正しい「右」ベクトル
 }
-function rotateView(dTheta, dPhi) {
-  camOrbit.theta += dTheta;
-  camOrbit.phi = THREE.MathUtils.clamp(camOrbit.phi + dPhi, 0.25, Math.PI/2 - 0.05);
-  applyOrbit();
-}
-function resetView() {
+function resetView() {   // つむモード開始時に一度だけ呼ぶ固定視点セットアップ
   camOrbit.theta = 0.55; camOrbit.phi = 1.05; camOrbit.radius = 16;
   applyOrbit();
 }
@@ -723,6 +719,7 @@ function goHome() {
   mode = null;
   tsumuRunning = false;
   heldBlock = null;
+  pendingDropBody = null;
   joyVec.x = joyVec.y = 0; joyVec.active = false;
   resetJoystickKnob();
   clearBlocks(); clearBalls();
@@ -762,7 +759,7 @@ function startKuzusu() {
 
 function updateHint() {
   if (mode !== 'kuzusu') return;
-  $('hint-bar').textContent = `したから ゆびで ひっぱって はなすと ボールが とぶよ！（${TOWER_PATTERNS[towerPatternIndex].name}）`;
+  $('hint-bar').textContent = `ななめに ひっぱって はなすと むきが かわるよ！（${TOWER_PATTERNS[towerPatternIndex].name}）`;
   $('hint-bar').style.display = 'block';
 }
 
@@ -784,11 +781,12 @@ function startTsumu() {
   clearBlocks(); clearBalls();
   hideAim();
   heldBlock = null; holdRotY = 0;
+  pendingDropBody = null;
   joyVec.x = joyVec.y = 0; joyVec.active = false;
   resetJoystickKnob();
   tsumuTimeLeft = 60;
   tsumuRunning = true;
-  resetView();                       // つむはオービット視点
+  resetView();                       // つむは固定視点（変更不可）
   show(screens.title, false);
   show(screens.result, false);
   setDisplay('hud', 'flex');
@@ -822,6 +820,7 @@ function endKuzusu() {
 
 function endTsumu() {
   tsumuRunning = false;
+  pendingDropBody = null;
   if (heldBlock) {
     // 操作中の積み木はそのまま落として確定
     heldBlock.body.type = CANNON.Body.DYNAMIC;
@@ -854,14 +853,18 @@ let lastMode = 'kuzusu';
 // キャンバスは初回タップで音声を有効化するだけ（視点・発射はボタンで）
 // キャンバスの発射操作はドラッグ（下記）で処理。音声有効化は onCanvasDown 内で実施。
 
-// ダブルタップズーム防止
+// ダブルタップズーム防止（多重の安全策）
 let lastTouchEnd = 0;
 document.addEventListener('touchend', (e) => {
   const now = Date.now();
-  if (now - lastTouchEnd < 350) e.preventDefault();
+  if (now - lastTouchEnd < 400) e.preventDefault();
   lastTouchEnd = now;
 }, { passive:false });
 document.addEventListener('gesturestart', e => e.preventDefault());
+document.addEventListener('gesturechange', e => e.preventDefault());
+document.addEventListener('dblclick', e => e.preventDefault());
+// iOSの長押し拡大鏡・コンテキストメニューも抑止
+document.addEventListener('contextmenu', e => e.preventDefault());
 
 // 長押し対応ボタン（押した瞬間に1回＋押しっぱなしで連続）
 function bindHold(id, fn, interval = 90) {
@@ -886,19 +889,15 @@ function bindTap(id, fn) {
   btn.addEventListener('click', () => { ensureAudio(); fn(); });
 }
 
-/* --- くずすモード：むき選択（ボタン）＋つみかた変更 --- */
-function adjustAim(key, delta) {
-  const [lo, hi] = AIM_LIMITS[key];
-  aim[key] = THREE.MathUtils.clamp(aim[key] + delta, lo, hi);
-  updateAimPreview();
-}
-bindHold('aim-ang-l', () => adjustAim('angleDeg', -1.6));
-bindHold('aim-ang-r', () => adjustAim('angleDeg',  1.6));
+/* --- くずすモード：つみかた変更 --- */
 bindTap('btn-pattern', () => cyclePattern());
 
-/* --- くずすモード：ドラッグで「ちから・たかさ」を決めて発射 --- */
+/* --- くずすモード：スワイプで「むき・ちから・たかさ」を決めて発射 ---
+   横方向のずれ(dx) → むき(角度)、縦方向のずれ(dy)＋総距離 → たかさ・ちから */
 let dragStart = null;
 let dragMoved = false;
+const SWIPE_ANGLE_RANGE = 40;   // 左右スワイプで振れる最大角度（度）
+const SWIPE_ANGLE_SPAN  = 220;  // この横方向ピクセル移動で最大角度に達する
 
 function pt(e) {
   if (e.changedTouches && e.changedTouches.length) {
@@ -920,8 +919,9 @@ function onCanvasMove(e) {
   const dx = p.x - dragStart.x, dy = p.y - dragStart.y;
   if (Math.hypot(dx, dy) > 12) dragMoved = true;
   if (dragMoved) {
-    aim.power  = THREE.MathUtils.clamp(Math.hypot(dx, dy) / 10, 4, 34);
-    aim.height = THREE.MathUtils.clamp(dy / 120, 0, 2.2);
+    aim.power    = THREE.MathUtils.clamp(Math.hypot(dx, dy) / 10, 4, 34);
+    aim.height   = THREE.MathUtils.clamp(dy / 120, 0, 2.2);
+    aim.angleDeg = THREE.MathUtils.clamp((dx / SWIPE_ANGLE_SPAN) * SWIPE_ANGLE_RANGE, -SWIPE_ANGLE_RANGE, SWIPE_ANGLE_RANGE);
     updateAimPreview();
   }
 }
@@ -941,14 +941,9 @@ canvas.addEventListener('mousedown', onCanvasDown);
 window.addEventListener('mousemove', onCanvasMove);
 window.addEventListener('mouseup',   onCanvasUp);
 
-/* --- つむモード：回転・落とす・視点 --- */
+/* --- つむモード：回転・落とす --- */
 bindTap('btn-rotate', () => { if (heldBlock) rotateHeldBlock(); });
 bindTap('btn-drop',   () => { if (heldBlock) dropHeldBlock(); });
-bindHold('vbtn-lf', () => rotateView( VIEW_ROT, 0));
-bindHold('vbtn-rt', () => rotateView(-VIEW_ROT, 0));
-bindHold('vbtn-up', () => rotateView(0,  VIEW_TILT));
-bindHold('vbtn-dn', () => rotateView(0, -VIEW_TILT));
-bindTap('vbtn-rs', () => resetView());
 
 /* --- ジョイスティック --- */
 const joyEl = $('joystick');
@@ -1057,6 +1052,7 @@ function animate() {
     }
   } else if (mode === 'tsumu' && tsumuRunning) {
     updateHeldBlock(dt);
+    checkPendingDrop();
     tsumuTickAcc += dt;
     if (tsumuTickAcc >= 0.25) {
       tsumuTickAcc = 0;
@@ -1080,9 +1076,11 @@ window.__game = {
   getAim() { return { ...aim }; },
   get towerPattern(){ return TOWER_PATTERNS[towerPatternIndex].name; },
   get towerPatternIndex(){ return towerPatternIndex; },
-  nudgeHeld(dx, dz) { heldX = THREE.MathUtils.clamp(heldX+dx, -PLACE_LIMIT, PLACE_LIMIT); heldZ = THREE.MathUtils.clamp(heldZ+dz, -PLACE_LIMIT, PLACE_LIMIT); },
-  rotateView, resetView,
-  get camOrbit(){ return { ...camOrbit }; },
+  setJoy(x, y) { joyVec.x = x; joyVec.y = y; joyVec.active = true; },
+  clearJoy() { joyVec.x = 0; joyVec.y = 0; joyVec.active = false; },
+  get heldXZ(){ return { x:+heldX.toFixed(3), z:+heldZ.toFixed(3) }; },
+  get tsumuAxes(){ return { fwd:{x:+tsumuForward.x.toFixed(3),z:+tsumuForward.z.toFixed(3)}, right:{x:+tsumuRight.x.toFixed(3),z:+tsumuRight.z.toFixed(3)} }; },
+  get pendingDrop(){ return !!pendingDropBody; },
   get blocks(){ return blocks; },
   get fallenCount(){ return fallenCount; },
   get ballsLeft(){ return ballsLeft; },
