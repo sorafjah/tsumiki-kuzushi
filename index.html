@@ -409,6 +409,14 @@ function clearBalls() {
   balls.forEach(b => { world.removeBody(b.body); scene.remove(b.mesh); });
   balls = [];
 }
+// 場に残っているボールがすべて静止しているか（飛行中・転がり中でないか）
+function ballsSettled() {
+  return balls.every(b => b.body.velocity.lengthSquared() < 0.1);
+}
+// タワーの積み木がまだ崩れ動いている最中でないか（ボールが止まった後も連鎖で倒れ続けることがあるため）
+function blocksSettled() {
+  return blocks.every(b => b.body.sleepState === CANNON.Body.SLEEPING || b.body.velocity.lengthSquared() < 0.05);
+}
 
 /* =========================================================
    くずすモード：タワー生成（複数パターンから選択）
@@ -450,10 +458,16 @@ function buildTower() {
 }
 
 function cyclePattern() {
+  // 結果待ちの間・ボールや積み木がまだ動いている間は変更させない（崩壊カウントの取りこぼし防止）
+  if (mode !== 'kuzusu' || ballsLeft <= 0 || !ballsSettled() || !blocksSettled()) return;
   towerPatternIndex = (towerPatternIndex + 1) % TOWER_PATTERNS.length;
   $('pattern-label').textContent = 'つみかた：' + TOWER_PATTERNS[towerPatternIndex].name;
-  resetTower();
+  buildTower();                 // タワーだけ作り直す（ボール数・崩壊数はそのまま）
+  waitingSettle = false;
+  aim.angleDeg = 0; aim.power = 16; aim.height = 1.1;
+  updateAimPreview();
   updateHint();
+  playPlace();
 }
 
 /* 崩壊判定：初期位置からの変位 or 傾き */
@@ -619,7 +633,7 @@ function updateHeldBlock(dt) {
 let pendingDropBody = null;
 let pendingDropTime = 0;
 const DROP_MIN_DELAY = 500;    // 最低でもこれだけ間を空ける（ms）
-const DROP_MAX_WAIT  = 2200;   // 万一寝ない場合の保険（ms）
+const DROP_MAX_WAIT  = 4000;   // 万一寝ない場合の保険（ms）／早すぎると重なりの原因になるため余裕を持たせる
 
 function dropHeldBlock() {
   if (!heldBlock) return;
@@ -1081,6 +1095,8 @@ window.__game = {
   get heldXZ(){ return { x:+heldX.toFixed(3), z:+heldZ.toFixed(3) }; },
   get tsumuAxes(){ return { fwd:{x:+tsumuForward.x.toFixed(3),z:+tsumuForward.z.toFixed(3)}, right:{x:+tsumuRight.x.toFixed(3),z:+tsumuRight.z.toFixed(3)} }; },
   get pendingDrop(){ return !!pendingDropBody; },
+  get ballsSettled(){ return ballsSettled(); },
+  get blocksSettled(){ return blocksSettled(); },
   get blocks(){ return blocks; },
   get fallenCount(){ return fallenCount; },
   get ballsLeft(){ return ballsLeft; },
@@ -1088,13 +1104,17 @@ window.__game = {
   get mode(){ return mode; },
   measureTowerHeight,
   ballPos() {
-    return balls.map(b => ({ x:+b.body.position.x.toFixed(2), y:+b.body.position.y.toFixed(2), z:+b.body.position.z.toFixed(2) }));
+    return balls.map(b => ({
+      x:+b.body.position.x.toFixed(2), y:+b.body.position.y.toFixed(2), z:+b.body.position.z.toFixed(2),
+      vx:+b.body.velocity.x.toFixed(2)
+    }));
   },
   blockStates() {
     return blocks.map(b => ({
       y: b.body.position.y,
       disp: b.body.position.distanceTo(b.initPos),
       sleeping: b.body.sleepState === CANNON.Body.SLEEPING,
+      velSq: b.body.velocity.lengthSquared(),
       fallen: b.fallen
     }));
   }
